@@ -14,12 +14,7 @@ fn test_small_vectors() {
     assert_eq!(256, kat_set.length);
     for test in kat_set.tests {
         let hash = sha3::sha3_256(&test.msg);
-        assert_eq!(
-            test.digest,
-            hex::encode(hash.0),
-            "length {} failed",
-            test.len
-        );
+        assert_eq!(test.digest, hex::encode(hash), "length {} failed", test.len);
     }
 }
 
@@ -31,11 +26,6 @@ fn test_large_vectors() {
     assert_eq!(256, kat_set.length);
     for test in kat_set.tests {
         let hash = sha3::sha3_256(&test.msg);
-        assert_eq!(
-            test.digest,
-            hex::encode(hash.0),
-            "length {} failed",
-            test.len
-        );
+        assert_eq!(test.digest, hex::encode(hash), "length {} failed", test.len);
     }
 }

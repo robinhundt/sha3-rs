@@ -16,10 +16,6 @@ const DELIMETED_SUFFIX: u8 = 0b110;
 type State = [u8; 200];
 type Lane = u64;
 
-fn rol64(a: Lane, offset: i32) -> Lane {
-    (a << offset) ^ (a >> (64 - offset))
-}
-
 fn i(x: usize, y: usize) -> usize {
     mem::size_of::<Lane>() * (x + 5 * y)
 }
@@ -87,7 +83,7 @@ fn keccakf_1600_state_permute(state: &mut State) {
             for x in 0..5 {
                 // Compute the θ effect for a given column
                 // (x + 4) % 5 is equivalent to (x - 1) % 5 in the spec
-                let D = C[(x + 4) % 5] ^ rol64(C[(x + 1) % 5], 1);
+                let D = C[(x + 4) % 5] ^ C[(x + 1) % 5].rotate_left(1);
                 // Add the θ effect to the whole column
                 for y in 0..5 {
                     xor_lane(x, y, D, state);
@@ -117,7 +113,7 @@ fn keccakf_1600_state_permute(state: &mut State) {
                 x = y;
                 y = Y;
                 let temp = read_lane(x, y, state);
-                write_lane(x, y, rol64(current, r), state);
+                write_lane(x, y, current.rotate_left(r), state);
                 current = temp;
             }
         }
