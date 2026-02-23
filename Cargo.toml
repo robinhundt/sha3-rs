@@ -7,3 +7,4 @@ version = "0.1.0"
 
 [dev-dependencies]
 libcrux-sha3 = "0.0.7"
+hex = "0.4.3"
