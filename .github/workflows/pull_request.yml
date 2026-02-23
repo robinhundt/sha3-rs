@@ -1,0 +1,111 @@
+name: Pull Request
+
+on:
+  pull_request:
+    branches:
+      - "main"
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      matrix:
+        os: [ "ubuntu-latest", "windows-latest", "macos-latest" ]
+    steps:
+      - &checkout
+        name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - &cache
+        name: Cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # 2.8.2
+      
+      - name: Show CPU info
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: lscpu
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: stable
+
+      - name: Run tests
+        run: cargo test --workspace --verbose --all-features --no-fail-fast
+
+  miri:
+    name: Miri
+    runs-on: "ubuntu-latest"
+    steps:
+      - *checkout
+      - *cache
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: nightly
+          components: "miri"
+
+      - name: Run miri test
+        env:
+          MIRIFLAGS: "-Zmiri-disable-isolation"
+        run: cargo miri t
+
+  fmt:
+    name: Rustfmt
+    runs-on: "ubuntu-latest"
+    steps:
+      - *checkout
+      - *cache
+
+      # nightly is needed for the unstable rustfmt options specified in project rustfmt.toml
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: nightly
+          components: "rustfmt"
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: "ubuntu-latest"
+    steps:
+      - *checkout
+      - *cache
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: "stable"
+          components: "clippy"
+
+      - name: Check Clippy
+        run: cargo clippy --workspace --all-features --examples --lib -- -D warnings
+
+  docs:
+    name: Docs
+    runs-on: "ubuntu-latest"
+    env:
+      # deny rustdoc warnings
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - *checkout
+      - *cache
+
+        # nightly is needed for the unstable rustdoc options
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: nightly
+          components: "rust-docs"
+
+      - name: Check docs
+        run: cargo doc --workspace --verbose --all-features --no-deps -Zunstable-options -Zrustdoc-scrape-examples
