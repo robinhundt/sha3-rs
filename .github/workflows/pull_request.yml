@@ -39,6 +39,28 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --verbose --all-features --no-fail-fast
 
+  test-big-endian:
+    name: Test Big-Endian
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout
+      - *cache
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: stable
+          components: "rust-src"
+          targets: "s390x-unknown-linux-gnu"
+      
+      - name: Install cargo cross
+        uses: taiki-e/install-action@cfdb446e391c69574ebc316dfb7d7849ec12b940 # 2.68.8
+        with:
+          tool: cross@0.2.5
+      
+      - name: Test on Big-Endian s390x
+        run: cross test --target s390x-unknown-linux-gnu
+
   miri:
     name: Miri
     runs-on: "ubuntu-latest"
