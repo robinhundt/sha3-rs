@@ -2,7 +2,7 @@ use crate::keccak::keccak;
 
 mod keccak;
 
-pub struct Digest([u8; 32]);
+pub struct Digest(pub [u8; 32]);
 
 pub fn sha3_256(message: &[u8]) -> Digest {
     let mut output = [0; 32];

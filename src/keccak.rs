@@ -71,17 +71,18 @@ fn lfsr_86540(state: &mut u8) -> i32 {
 fn keccakf_1600_state_permute(state: &mut State) {
     let mut lfsr_state = 0x01;
 
-    for round in 0..24 {
+    for _round in 0..24 {
         {
             // θ step (Algorithm 1 θ(A))
             let mut C: [Lane; 5] = Default::default();
             // Step 1
             // Computes the parity of the columns
-            for x in 0..5 {
+            for (x, Cx) in C.iter_mut().enumerate() {
                 for y in 0..5 {
-                    C[x] ^= read_lane(x, y, state)
+                    *Cx ^= read_lane(x, y, state)
                 }
             }
+
             // Step 2
             for x in 0..5 {
                 // Compute the θ effect for a given column
@@ -126,8 +127,8 @@ fn keccakf_1600_state_permute(state: &mut State) {
             let mut temp: [Lane; 5] = Default::default();
             for y in 0..5 {
                 // copy the plane
-                for x in 0..5 {
-                    temp[x] = read_lane(x, y, state)
+                for (x, tempx) in temp.iter_mut().enumerate() {
+                    *tempx = read_lane(x, y, state)
                 }
                 // compute χ on the plane
                 for x in 0..5 {
