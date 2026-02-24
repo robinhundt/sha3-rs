@@ -40,8 +40,11 @@ jobs:
         run: cargo test --workspace --verbose --all-features --no-fail-fast
 
   test-big-endian:
-    name: Test Big-Endian
+    name: Test Big-Endian and 32-bit arch
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [ "s390x-unknown-linux-gnu", "i686-unknown-linux-gnu" ]
     steps:
       - *checkout
       - *cache
@@ -51,15 +54,15 @@ jobs:
         with:
           toolchain: stable
           components: "rust-src"
-          targets: "s390x-unknown-linux-gnu"
+          targets: "${{ matrix.target }}"
       
       - name: Install cargo cross
         uses: taiki-e/install-action@cfdb446e391c69574ebc316dfb7d7849ec12b940 # 2.68.8
         with:
           tool: cross@0.2.5
       
-      - name: Test on Big-Endian s390x
-        run: cross test --target s390x-unknown-linux-gnu
+      - name: Test on ${{ matrix.target }}
+        run: cross test --target ${{ matrix.target }}
 
   miri:
     name: Miri
