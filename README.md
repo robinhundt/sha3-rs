@@ -10,6 +10,16 @@ This repository provides a portable and pure Rust implementation of the SHA-3 ha
 The implementation is largely based on those contained in the [XKCP] repository from the Keccak Team. The largest influences are the [readable and compact] and the [ref-64-bits] implementations. I purposely did not refer to other Rust implementations of SHA-3 to not be biased by their choices and determine how hard it would be to implement SHA-3 from the reference implementations in another language (C) and the [FIPS 202] standard.  
 An implementation intended for production should definitely take learnings from a broader set of implementations (including those in Rust, e.g. [libcrux-sha3], [sha3]).
 
+## Limitations
+
+This software is intended as a learning exercise and not for production use.
+
+Performance has thus far not been a priority. This implementation is likely orders of magnitude slower than optimized ones.
+
+We currently only expose functions to hash a complete byte slice `&[u8]`. Individual bits or multiple inputs that update the hash are currently not supported.
+
+We currently do not implement the SHAKE extendable-output functions described in [FIPS 202].
+
 ## Platform support
 This crate is tested in CI to work on the GitHub `ubuntu-latest` (x86-64), `windows-latest` (x86-64) and `macos-latest` (arm64) runners. Additionally, we run the test suite on a QEMU emulated `s390-unknown-linux-gnu` target using [cross] in CI, to test support on big-endian systems.
 
