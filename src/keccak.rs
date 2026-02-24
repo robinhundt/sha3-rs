@@ -11,6 +11,10 @@
 #![allow(non_snake_case)]
 use std::{cmp, mem};
 
+// NOTE: References to Sections, Algorithms, Tables, etc. refer to the
+// FIPS 202 standard (https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf)
+// if not otherwise specified.
+
 /// Bits that are appended to the end of the input for domain separation and
 /// padding. For SHA-3, this is the bit pattern 0b10 + the first 1 bit of the
 /// pad10*1 padding.
@@ -18,13 +22,20 @@ const DELIMETED_SUFFIX: u8 = 0b110;
 
 const ROUNDS: usize = 24;
 
+/// State array A. Contains 1600 bits.
 #[derive(Clone, Copy)]
 struct State {
+    // TODO: Can we use [u64; 25] without needing unsafe or bytemuck/zerocopy?
     bytes: [u8; 200],
 }
 
+/// Lane of the [`State`] array containing w = 64 bits.
 type Lane = u64;
 
+/// Compute a [`Lane`] index if viewing the [`State`] as `[u64; 25]`.
+///
+/// Note that this does not give you the start byte of a lane in the actual
+/// [`State`]. For that, use [`lane_start_byte`].
 fn idx(x: usize, y: usize) -> usize {
     // TODO: As in the XKCP/lib/low/KeccakP-1600/ref-64bits/KeccakP-1600-reference.c
     //  reference implementation, this always performs the modulo operation.
@@ -33,6 +44,10 @@ fn idx(x: usize, y: usize) -> usize {
     (x % 5) + 5 * (y % 5)
 }
 
+/// Start byte of a [`Lane`] in the [`State`].
+///
+/// The [`Lane`] is located at the 8 bytes starting from the position returned
+/// by this function.
 fn lane_start_byte(x: usize, y: usize) -> usize {
     mem::size_of::<Lane>() * idx(x, y)
 }
@@ -41,6 +56,7 @@ fn lane_start_byte(x: usize, y: usize) -> usize {
 // These could be optimized by having state be u64 aligned so that we
 // can directly store/load/xor lanes on LE architectures.
 impl State {
+    /// Retrieve the [`Lane`] with coordinates `x` and `y`.
     fn lane(&self, x: usize, y: usize) -> Lane {
         let start = lane_start_byte(x, y);
         // TODO check whether this optimizes to a simple unaligned load
@@ -48,11 +64,14 @@ impl State {
         //  not optimized out
         let bytes = self.bytes[start..start + 8]
             .try_into()
-            // Very likely to be optimized out
+            // TODO: Check optimization
+            //  Very likely to be optimized out
             .expect("slice has length 8");
         Lane::from_le_bytes(bytes)
     }
 
+    /// Overwrite the [`Lane`] at coordinates `x` and `y` with the provided
+    /// [`Lane`].
     fn write_lane(&mut self, x: usize, y: usize, lane: Lane) {
         // TODO does this properly optimize on an LE architecture?
         let bytes = lane.to_le_bytes();
@@ -60,6 +79,8 @@ impl State {
         self.bytes[start..start + 8].copy_from_slice(&bytes);
     }
 
+    /// In-place XOR of the [`Lane`] at coordinates `x` and `y` with the
+    /// provided [`Lane`].
     fn xor_lane(&mut self, x: usize, y: usize, lane: Lane) {
         // TODO Unlikely that this properly optimizes on LE arches
         //  If the state where u64 aligned, this would be much more efficient
@@ -102,6 +123,7 @@ fn theta(A: &mut State) {
 
 /// Table 2: Values are modulo the width w = 64
 /// In row-major order starting with x = 0, y = 0
+// TODO: Compute this table with a const function to be closer to spec?
 const KECCAK_RHO_OFFSETS: [u32; 25] = [
     0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14,
 ];
@@ -156,6 +178,10 @@ fn chi(A: &mut State) {
     }
 }
 
+/// Round-constants applied to the (0, 0) lane in the [`iota`] step.
+/// Table taken from:
+/// https://github.com/XKCP/XKCP/blob/716f007dd73ef28d357b8162173646be574ad1b7/lib/low/KeccakP-1600/ref-64bits/KeccakP-1600-reference.c#L109-L135
+// TODO: Compute this table with a const function to be closer to spec?
 const KECCAK_ROUND_CONSTANTS: [Lane; ROUNDS] = [
     0x0000000000000001,
     0x0000000000008082,
@@ -184,10 +210,19 @@ const KECCAK_ROUND_CONSTANTS: [Lane; ROUNDS] = [
 ];
 
 /// 3.2.5 Algorithm 6: ι(A, ir)
+///
+/// Quote from 3.2.5:
+/// > The effect of ι is to modify some of the bits of Lane (0, 0) in a manner
+/// > that depends on the round
+/// > index ir. The other 24 lanes are not affected by ι.
 fn iota(A: &mut State, round: usize) {
     A.xor_lane(0, 0, KECCAK_ROUND_CONSTANTS[round]);
 }
 
+/// 3.3 Algorithm 7: KECCAK-p[b, nr](S)
+///
+/// Not the generic algorithm, but specialized to `b = 1600` and `nr = 24`.
+/// See Section 3.4 of FIPS 202.
 fn keccakf_1600_state_permute(state: &mut State) {
     for round in 0..ROUNDS {
         theta(state);
@@ -198,6 +233,14 @@ fn keccakf_1600_state_permute(state: &mut State) {
     }
 }
 
+/// 4. and 5. Sponge Construction instantiated with `pad10*1` and
+///    `KECCAK-p[1600, 24]`
+// TODO split this function into init/absorbing/squeezing stages. This would
+//  allow a lower level API  where data can be absorbed multiple times into the
+//  state (`update`)
+// TODO have domain separation suffix as parameter to reuse
+//  keccak for SHAEK XOFs (currently hard-coded for SHA3)
+// TODO Only have capacity as parameter and compute rate to be closer to spec?
 pub(crate) fn keccak(rate: usize, capacity: usize, mut input: &[u8], mut output: &mut [u8]) {
     let mut state = State { bytes: [0_u8; 200] };
     let rate_in_bytes = rate / 8;
@@ -208,6 +251,7 @@ pub(crate) fn keccak(rate: usize, capacity: usize, mut input: &[u8], mut output:
 
     let mut input_byte_len = input.len();
 
+    // TODO: more idiomatic by iterating over input.chunks(rate_in_bytes)
     // Absorb input blocks
     while input_byte_len > 0 {
         block_size = cmp::min(input_byte_len, rate_in_bytes);
@@ -223,13 +267,15 @@ pub(crate) fn keccak(rate: usize, capacity: usize, mut input: &[u8], mut output:
         }
     }
 
+    // Add domain separator and first 1 bit of padding
     state.bytes[block_size] ^= DELIMETED_SUFFIX;
-    // Add second bit of padding
+    // Add second 1 bit of padding
     state.bytes[rate_in_bytes - 1] ^= 0b10000000_u8;
 
     // squeezing phase
     keccakf_1600_state_permute(&mut state);
 
+    // TODO: more idiomatic by iterating over output.chunks(rate_in_bytes)
     let mut output_byte_len = output.len();
     while output_byte_len > 0 {
         let block_size = cmp::min(output_byte_len, rate_in_bytes);
