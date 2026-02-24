@@ -9,7 +9,7 @@
 //! [ref-64-bits]: https://github.com/XKCP/XKCP/tree/716f007dd73ef28d357b8162173646be574ad1b7/lib/low/KeccakP-1600/ref-64bits
 //! [XKCP]: https://github.com/XKCP/XKCP
 #![allow(non_snake_case)]
-use std::{cmp, mem};
+use std::mem;
 
 // NOTE: References to Sections, Algorithms, Tables, etc. refer to the
 // FIPS 202 standard (https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf)
@@ -20,6 +20,7 @@ use std::{cmp, mem};
 /// pad10*1 padding.
 const DELIMETED_SUFFIX: u8 = 0b110;
 
+/// Number of rounds performed in `KECCAK-C`.
 const ROUNDS: usize = 24;
 
 /// State array A. Contains 1600 bits.
@@ -241,27 +242,33 @@ fn keccakf_1600_state_permute(state: &mut State) {
 // TODO have domain separation suffix as parameter to reuse
 //  keccak for SHAEK XOFs (currently hard-coded for SHA3)
 // TODO Only have capacity as parameter and compute rate to be closer to spec?
-pub(crate) fn keccak(rate: usize, capacity: usize, mut input: &[u8], mut output: &mut [u8]) {
+pub(crate) fn keccak(rate: usize, capacity: usize, input: &[u8], output: &mut [u8]) {
     let mut state = State { bytes: [0_u8; 200] };
     let rate_in_bytes = rate / 8;
+
+    debug_assert_eq!(
+        1600,
+        rate + capacity,
+        "rate + capacity must equal 1600 for SHA-3"
+    );
+    debug_assert_eq!(0, rate % 8, "rate must be divisible by 8");
+
+    // Absorb input blocks into state
     let mut block_size = 0;
+    for input_block in input.chunks(rate_in_bytes) {
+        block_size = input_block.len();
 
-    assert_eq!(1600, rate + capacity);
-    assert_eq!(0, rate % 8);
+        // for_each combinator can lead to better codegen
+        // TODO benchmark this
+        state
+            .bytes
+            .iter_mut()
+            .zip(input_block)
+            .for_each(|(state, input)| {
+                *state ^= input;
+            });
 
-    let mut input_byte_len = input.len();
-
-    // TODO: more idiomatic by iterating over input.chunks(rate_in_bytes)
-    // Absorb input blocks
-    while input_byte_len > 0 {
-        block_size = cmp::min(input_byte_len, rate_in_bytes);
-        for (state_i, input_i) in state.bytes[..block_size].iter_mut().zip(input) {
-            *state_i ^= input_i;
-        }
-        input = &input[block_size..];
-        input_byte_len -= block_size;
-
-        if block_size == rate_in_bytes {
+        if input_block.len() == rate_in_bytes {
             keccakf_1600_state_permute(&mut state);
             block_size = 0;
         }
@@ -273,18 +280,9 @@ pub(crate) fn keccak(rate: usize, capacity: usize, mut input: &[u8], mut output:
     state.bytes[rate_in_bytes - 1] ^= 0b10000000_u8;
 
     // squeezing phase
-    keccakf_1600_state_permute(&mut state);
-
-    // TODO: more idiomatic by iterating over output.chunks(rate_in_bytes)
-    let mut output_byte_len = output.len();
-    while output_byte_len > 0 {
-        let block_size = cmp::min(output_byte_len, rate_in_bytes);
-        output.copy_from_slice(&state.bytes[..block_size]);
-        output = &mut output[block_size..];
-        output_byte_len -= block_size;
-
-        if output_byte_len > 0 {
-            keccakf_1600_state_permute(&mut state);
-        }
+    for output_block in output.chunks_mut(rate_in_bytes) {
+        keccakf_1600_state_permute(&mut state);
+        let block_size = output_block.len();
+        output_block.copy_from_slice(&state.bytes[..block_size]);
     }
 }
