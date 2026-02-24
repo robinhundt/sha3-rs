@@ -21,7 +21,7 @@ We currently only expose functions to hash a complete byte slice `&[u8]`. Indivi
 We currently do not implement the SHAKE extendable-output functions described in [FIPS 202].
 
 ## Platform support
-This crate is tested in CI to work on the GitHub `ubuntu-latest` (x86-64), `windows-latest` (x86-64) and `macos-latest` (arm64) runners. Additionally, we run the test suite on a QEMU emulated `s390-unknown-linux-gnu` target using [cross] in CI, to test support on big-endian systems.
+This crate is tested in CI to work on the GitHub `ubuntu-latest` (x86-64), `windows-latest` (x86-64) and `macos-latest` (arm64) runners. Additionally, we run the test suite on a QEMU emulated `s390-unknown-linux-gnu` and `i686-unknown-linux-gnu` targets using [cross] in CI, to test support on big-endian and 32-bit systems.
 
 ## Testing
 
