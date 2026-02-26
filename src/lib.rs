@@ -74,6 +74,7 @@ pub fn sha3_512(message: &[u8]) -> [u8; 64] {
 
 #[cfg(test)]
 mod tests {
+
     use crate::sha3_256;
 
     #[test]
