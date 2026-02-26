@@ -254,28 +254,17 @@ pub(crate) fn keccak(rate: usize, capacity: usize, input: &[u8], output: &mut [u
     debug_assert_eq!(0, rate % 8, "rate must be divisible by 8");
 
     // Absorb input blocks into state
-    let mut block_size = 0;
-    for input_block in input.chunks(rate_in_bytes) {
-        block_size = input_block.len();
-
-        // for_each combinator can lead to better codegen
-        // TODO benchmark this
-        state
-            .bytes
-            .iter_mut()
-            .zip(input_block)
-            .for_each(|(state, input)| {
-                *state ^= input;
-            });
-
-        if input_block.len() == rate_in_bytes {
-            keccakf_1600_state_permute(&mut state);
-            block_size = 0;
-        }
+    let mut iter = input.chunks_exact(rate_in_bytes);
+    for input_block in iter.by_ref() {
+        xor_bytes(&mut state.bytes, &input_block);
+        keccakf_1600_state_permute(&mut state);
     }
 
+    xor_bytes(&mut state.bytes, iter.remainder());
+
+    let end = iter.remainder().len();
     // Add domain separator and first 1 bit of padding
-    state.bytes[block_size] ^= DELIMETED_SUFFIX;
+    state.bytes[end] ^= DELIMETED_SUFFIX;
     // Add second 1 bit of padding
     state.bytes[rate_in_bytes - 1] ^= 0b10000000_u8;
 
@@ -285,4 +274,12 @@ pub(crate) fn keccak(rate: usize, capacity: usize, input: &[u8], output: &mut [u
         let block_size = output_block.len();
         output_block.copy_from_slice(&state.bytes[..block_size]);
     }
+}
+
+fn xor_bytes(dest: &mut [u8], other: &[u8]) {
+    // for_each combinator can lead to better codegen
+    // TODO benchmark this
+    dest.iter_mut().zip(other).for_each(|(state, input)| {
+        *state ^= input;
+    });
 }
