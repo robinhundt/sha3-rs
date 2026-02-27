@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 //! SHA-3 Hash Functions
 //!
 //! This crate provides portable, pure Rust implementations of the SHA-3 hashing
