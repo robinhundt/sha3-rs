@@ -29,9 +29,10 @@
 //!
 //! [FIPS 202]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf
 
-mod keccak;
+mod permute;
+mod sponge;
 
-use crate::keccak::keccak;
+use crate::sponge::Absorb;
 
 // TODO: remove code duplication. Use a macro?
 
@@ -40,7 +41,11 @@ pub fn sha3_224(message: &[u8]) -> [u8; 28] {
     let mut output = [0; 28];
     const CAPACITY: usize = 224 * 2;
     const RATE: usize = 1600 - CAPACITY;
-    keccak(RATE, CAPACITY, message, &mut output);
+    const RATE_BYTES: usize = RATE / 8;
+    let mut absorb = Absorb::<RATE_BYTES>::new();
+    absorb.absorb(message);
+    let mut sq = absorb.into_squeeze::<0b110>();
+    sq.squeeze(&mut output);
     output
 }
 
@@ -49,7 +54,11 @@ pub fn sha3_256(message: &[u8]) -> [u8; 32] {
     let mut output = [0; 32];
     const CAPACITY: usize = 256 * 2;
     const RATE: usize = 1600 - CAPACITY;
-    keccak(RATE, CAPACITY, message, &mut output);
+    const RATE_BYTES: usize = RATE / 8;
+    let mut absorb = Absorb::<RATE_BYTES>::new();
+    absorb.absorb(message);
+    let mut sq = absorb.into_squeeze::<0b110>();
+    sq.squeeze(&mut output);
     output
 }
 
@@ -58,7 +67,11 @@ pub fn sha3_384(message: &[u8]) -> [u8; 48] {
     let mut output = [0; 48];
     const CAPACITY: usize = 384 * 2;
     const RATE: usize = 1600 - CAPACITY;
-    keccak(RATE, CAPACITY, message, &mut output);
+    const RATE_BYTES: usize = RATE / 8;
+    let mut absorb = Absorb::<RATE_BYTES>::new();
+    absorb.absorb(message);
+    let mut sq = absorb.into_squeeze::<0b110>();
+    sq.squeeze(&mut output);
     output
 }
 
@@ -67,7 +80,11 @@ pub fn sha3_512(message: &[u8]) -> [u8; 64] {
     let mut output = [0; 64];
     const CAPACITY: usize = 512 * 2;
     const RATE: usize = 1600 - CAPACITY;
-    keccak(RATE, CAPACITY, message, &mut output);
+    const RATE_BYTES: usize = RATE / 8;
+    let mut absorb = Absorb::<RATE_BYTES>::new();
+    absorb.absorb(message);
+    let mut sq = absorb.into_squeeze::<0b110>();
+    sq.squeeze(&mut output);
     output
 }
 

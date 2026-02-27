@@ -1,7 +1,7 @@
-//! SHA-3 implementation based on [XKCP]
+//! KECCAK permutation based on [XKCP]
 //!
-//! This implementation of SHA-3 is based on the [readable and compact]
-//! and the [ref-64-bits] implementations of the Keccak Team. It is currently
+//! This implementation of KECCAK is based on the [readable and compact]
+//! and the [ref-64-bits] implementations of the KECCAK Team. It is currently
 //! written in slightly unidiomatic rust to closely adhere to the linked
 //! reference implementation.
 //!
@@ -12,17 +12,11 @@
 use std::{
     mem,
     ops::{Index, IndexMut},
-    slice,
 };
 
 // NOTE: References to Sections, Algorithms, Tables, etc. refer to the
 // FIPS 202 standard (https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf)
 // if not otherwise specified.
-
-/// Bits that are appended to the end of the input for domain separation and
-/// padding. For SHA-3, this is the bit pattern 0b10 + the first 1 bit of the
-/// pad10*1 padding.
-const DELIMETED_SUFFIX: u8 = 0b110;
 
 /// Number of rounds performed in `KECCAK-C`.
 const ROUNDS: usize = 24;
@@ -30,24 +24,18 @@ const ROUNDS: usize = 24;
 /// Lane of the [`State`] array containing w = 64 bits.
 type Lane = u64;
 
-/// State array A. Contains 1600 bits.
+/// State array A of Keccakf[1600]. Contains 1600 bits.
 #[derive(Clone, Copy)]
-struct State([Lane; 25]);
+pub(crate) struct State<const RATE_BYTES: usize>([Lane; 25]);
 
-/// Compute a [`Lane`] index if viewing the [`State`] as `[u64; 25]`.
-///
-/// Note that this does not give you the start byte of a lane in the actual
-/// [`State`]. For that, use [`lane_start_byte`].
+/// Compute a [`Lane`] index in [`State`].
 #[inline(always)]
 fn idx(x: usize, y: usize) -> usize {
-    // TODO: As in the XKCP/lib/low/KeccakP-1600/ref-64bits/KeccakP-1600-reference.c
-    //  reference implementation, this always performs the modulo operation.
-    //  Does the compiler remove this operation in cases where it is not necessary,
-    //  e.g. when x and y come from bounded loops?
+    // % ops are optimized out
     (x % 5) + 5 * (y % 5)
 }
 
-impl Index<(usize, usize)> for State {
+impl<const RATE_BYTES: usize> Index<(usize, usize)> for State<RATE_BYTES> {
     type Output = Lane;
 
     #[inline(always)]
@@ -56,21 +44,55 @@ impl Index<(usize, usize)> for State {
     }
 }
 
-impl IndexMut<(usize, usize)> for State {
+impl<const RATE_BYTES: usize> IndexMut<(usize, usize)> for State<RATE_BYTES> {
     #[inline(always)]
     fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut Self::Output {
         &mut self.0[idx(x, y)]
     }
 }
 
-impl State {
-    fn bytes_mut(&mut self) -> &mut [u8] {
-        let len = self.0.len() * mem::size_of::<u64>();
-        let ptr = self.0.as_mut_ptr().cast();
-        // TODO safety
-        unsafe { slice::from_raw_parts_mut(ptr, len) }
+impl<const RATE_BYTES: usize> State<RATE_BYTES> {
+    pub(crate) fn new() -> Self {
+        Self([0; 25])
     }
 
+    pub(crate) fn bytes(&self) -> &[u8; RATE_BYTES] {
+        assert!(RATE_BYTES < mem::size_of::<[Lane; 25]>());
+        // SAFETY:
+        // - ptr is non-null
+        // - ptr is correctly aligned (align(u8) < align(u64))
+        // - pointed to memory is valid and correct size
+        unsafe { &*self.0.as_ptr().cast() }
+    }
+
+    pub(crate) fn bytes_mut(&mut self) -> &mut [u8; RATE_BYTES] {
+        assert!(RATE_BYTES < mem::size_of::<[Lane; 25]>());
+        // SAFETY:
+        // - ptr is non-null
+        // - ptr is correctly aligned (align(u8) < align(u64))
+        // - pointed to memory is valid and correct size
+        unsafe { &mut *self.0.as_mut_ptr().cast() }
+    }
+
+    /// 3.3 Algorithm 7: KECCAK-p[b, nr](S)
+    ///
+    /// Not the generic algorithm, but specialized to `b = 1600` and `nr = 24`.
+    /// See Section 3.4 of FIPS 202.
+    pub(crate) fn keccakf_1600_permute(&mut self) {
+        self.lanes_to_le();
+        for round in 0..ROUNDS {
+            theta(self);
+            rho(self);
+            pi(self);
+            chi(self);
+            iota(self, round);
+        }
+        self.lanes_to_le();
+    }
+
+    /// On big-endian arch, convert lanes to little-endian by swapping bytes.
+    ///
+    /// No-op on little endian architecture.
     fn lanes_to_le(&mut self) {
         #[cfg(target_endian = "big")]
         self.0.iter_mut().for_each(|l| *l = l.to_le());
@@ -78,7 +100,7 @@ impl State {
 }
 
 /// 3.2.1 Algorithm 1: θ(A)
-fn theta(A: &mut State) {
+fn theta<const RATE_BYTES: usize>(A: &mut State<RATE_BYTES>) {
     // We have 5 * 64 columns, whose parity bits we can store in 5 lanes
     let mut C: [Lane; 5] = Default::default();
     // Step 1
@@ -120,7 +142,7 @@ const KECCAK_RHO_OFFSETS: [u32; 25] = [
 /// > offset, which depends on the fixed x and y coordinates of the
 /// > lane. Equivalently, for each bit in the lane, the z coordinate is
 /// > modified by adding the offset, modulo the lane size.
-fn rho(A: &mut State) {
+fn rho<const RATE_BYTES: usize>(A: &mut State<RATE_BYTES>) {
     for x in 0..5 {
         for y in 0..5 {
             A[(x, y)] = A[(x, y)].rotate_left(KECCAK_RHO_OFFSETS[x + 5 * y]);
@@ -133,7 +155,7 @@ fn rho(A: &mut State) {
 /// Quote from 3.2.3 (description of π):
 /// > The effect of π is to rearrange the positions of the lanes, as illustrated
 /// > for any slice in Figure 5 below.
-fn pi(A: &mut State) {
+fn pi<const RATE_BYTES: usize>(A: &mut State<RATE_BYTES>) {
     let temp_A = *A;
     for x in 0..5 {
         for y in 0..5 {
@@ -149,7 +171,7 @@ fn pi(A: &mut State) {
 /// Quote from 3.2.4:
 /// > The effect of χ is to XOR each bit with a non-linear function of two other
 /// > bits in its row
-fn chi(A: &mut State) {
+fn chi<const RATE_BYTES: usize>(A: &mut State<RATE_BYTES>) {
     let mut C: [Lane; 5] = Default::default();
 
     for y in 0..5 {
@@ -199,73 +221,6 @@ const KECCAK_ROUND_CONSTANTS: [Lane; ROUNDS] = [
 /// > The effect of ι is to modify some of the bits of Lane (0, 0) in a manner
 /// > that depends on the round
 /// > index ir. The other 24 lanes are not affected by ι.
-fn iota(A: &mut State, round: usize) {
+fn iota<const RATE_BYTES: usize>(A: &mut State<RATE_BYTES>, round: usize) {
     A[(0, 0)] ^= KECCAK_ROUND_CONSTANTS[round];
-}
-
-/// 3.3 Algorithm 7: KECCAK-p[b, nr](S)
-///
-/// Not the generic algorithm, but specialized to `b = 1600` and `nr = 24`.
-/// See Section 3.4 of FIPS 202.
-fn keccakf_1600_state_permute(state: &mut State) {
-    state.lanes_to_le();
-    for round in 0..ROUNDS {
-        theta(state);
-        rho(state);
-        pi(state);
-        chi(state);
-        iota(state, round);
-    }
-
-    state.lanes_to_le();
-}
-
-/// 4. and 5. Sponge Construction instantiated with `pad10*1` and
-///    `KECCAK-p[1600, 24]`
-// TODO split this function into init/absorbing/squeezing stages. This would
-//  allow a lower level API  where data can be absorbed multiple times into the
-//  state (`update`)
-// TODO have domain separation suffix as parameter to reuse
-//  keccak for SHAEK XOFs (currently hard-coded for SHA3)
-// TODO Only have capacity as parameter and compute rate to be closer to spec?
-pub(crate) fn keccak(rate: usize, capacity: usize, input: &[u8], output: &mut [u8]) {
-    let mut state = State([0; 25]);
-    let rate_in_bytes = rate / 8;
-
-    debug_assert_eq!(
-        1600,
-        rate + capacity,
-        "rate + capacity must equal 1600 for SHA-3"
-    );
-    debug_assert_eq!(0, rate % 8, "rate must be divisible by 8");
-
-    // Absorb input blocks into state
-    let mut iter = input.chunks_exact(rate_in_bytes);
-    for input_block in iter.by_ref() {
-        xor_bytes(state.bytes_mut(), input_block);
-        keccakf_1600_state_permute(&mut state);
-    }
-
-    xor_bytes(state.bytes_mut(), iter.remainder());
-
-    let end = iter.remainder().len();
-    // Add domain separator and first 1 bit of padding
-    state.bytes_mut()[end] ^= DELIMETED_SUFFIX;
-    // Add second 1 bit of padding
-    state.bytes_mut()[rate_in_bytes - 1] ^= 0b10000000_u8;
-
-    // squeezing phase
-    for output_block in output.chunks_mut(rate_in_bytes) {
-        keccakf_1600_state_permute(&mut state);
-        let block_size = output_block.len();
-        output_block.copy_from_slice(&state.bytes_mut()[..block_size]);
-    }
-}
-
-fn xor_bytes(dest: &mut [u8], other: &[u8]) {
-    // for_each combinator can lead to better codegen
-    // TODO benchmark this
-    dest.iter_mut().zip(other).for_each(|(state, input)| {
-        *state ^= input;
-    });
 }
