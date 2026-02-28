@@ -2,40 +2,50 @@
 use crate::permute::State;
 
 /// Absorb bytes into the Keccakf[1600] state.
-pub(crate) struct Absorb<const RATE_BYTES: usize> {
+pub(crate) struct AbsorbState<const RATE: usize> {
     pos: usize,
-    state: State<RATE_BYTES>,
+    state: State<RATE>,
 }
 
-impl<const RATE_BYTES: usize> Absorb<RATE_BYTES> {
-    pub(crate) fn new() -> Self {
+pub(crate) trait Absorb {
+    type Squeeze: Squeeze;
+
+    fn init() -> Self;
+    fn absorb(&mut self, msg: &[u8]);
+    fn into_squeeze<const DELIMETED_SUFFIX: u8>(self) -> Self::Squeeze;
+}
+
+impl<const RATE: usize> Absorb for AbsorbState<RATE> {
+    type Squeeze = SqueezeState<RATE>;
+
+    fn init() -> Self {
         Self {
             state: State::new(),
             pos: 0,
         }
     }
 
-    pub(crate) fn absorb(&mut self, msg: &[u8]) {
+    fn absorb(&mut self, msg: &[u8]) {
         // first, we handle a potentially partial block, either due to and advanced
-        // position or msg.len() < RATE_BYTES
-        let partial_block_len = (RATE_BYTES - self.pos).min(msg.len());
+        // position or msg.len() < RATE
+        let partial_block_len = (RATE - self.pos).min(msg.len());
         let (first_msg, rest_msg) = msg.split_at(partial_block_len);
         xor_bytes(&mut self.state.bytes_mut()[self.pos..], first_msg);
         // if the state was filled, we permute and reset the position
-        if self.pos + partial_block_len == RATE_BYTES {
+        if self.pos + partial_block_len == RATE {
             self.state.keccakf_1600_permute();
             self.pos = 0;
         } else {
             // otherwise, we increment the position.
             self.pos += partial_block_len;
-            // this branch is only taken if self.pos + partial_block_len < RATE_BYTES, so
+            // this branch is only taken if self.pos + partial_block_len < RATE, so
             // we know that rest_msg.is_empty() and can safely return
             debug_assert!(rest_msg.is_empty());
             return;
         }
 
         // Absorb the remaining message
-        let (chunks, rest) = rest_msg.as_chunks::<RATE_BYTES>();
+        let (chunks, rest) = rest_msg.as_chunks::<RATE>();
         for chunk in chunks {
             xor_bytes(self.state.bytes_mut(), chunk);
             self.state.keccakf_1600_permute();
@@ -49,26 +59,32 @@ impl<const RATE_BYTES: usize> Absorb<RATE_BYTES> {
     /// Note that this performs no permute! Contrary to to FIPS202, we define
     /// the squeezing phase to start with a permutation (instead of ending
     /// the absorption with a permutation).
-    pub(crate) fn into_squeeze<const DELIMETED_SUFFIX: u8>(mut self) -> Squeeze<RATE_BYTES> {
+    fn into_squeeze<const DELIMETED_SUFFIX: u8>(mut self) -> SqueezeState<RATE> {
         let state_bytes = self.state.bytes_mut();
         state_bytes[self.pos] ^= DELIMETED_SUFFIX;
-        state_bytes[RATE_BYTES - 1] ^= 0b10000000_u8;
-        Squeeze::new(self.state)
+        state_bytes[RATE - 1] ^= 0b10000000_u8;
+        SqueezeState::new(self.state)
     }
 }
 
 /// Squeeze bytes from the Keccakf[1600] state.
-pub(crate) struct Squeeze<const RATE_BYTES: usize> {
+pub(crate) struct SqueezeState<const RATE: usize> {
     pos: usize,
-    state: State<RATE_BYTES>,
+    state: State<RATE>,
 }
 
-impl<const RATE_BYTES: usize> Squeeze<RATE_BYTES> {
-    fn new(state: State<RATE_BYTES>) -> Self {
+impl<const RATE: usize> SqueezeState<RATE> {
+    fn new(state: State<RATE>) -> Self {
         Self { pos: 0, state }
     }
+}
 
-    pub(crate) fn squeeze(&mut self, output: &mut [u8]) {
+pub(crate) trait Squeeze {
+    fn squeeze(&mut self, output: &mut [u8]);
+}
+
+impl<const RATE: usize> Squeeze for SqueezeState<RATE> {
+    fn squeeze(&mut self, output: &mut [u8]) {
         if output.is_empty() {
             return;
         }
@@ -76,18 +92,18 @@ impl<const RATE_BYTES: usize> Squeeze<RATE_BYTES> {
         if self.pos == 0 {
             self.state.keccakf_1600_permute();
         }
-        let partial_block_len = (RATE_BYTES - self.pos).min(output.len());
+        let partial_block_len = (RATE - self.pos).min(output.len());
         let (first_output, rest_output) = output.split_at_mut(partial_block_len);
         first_output.copy_from_slice(&self.state.bytes()[self.pos..self.pos + partial_block_len]);
-        self.pos = (self.pos + partial_block_len) % RATE_BYTES;
+        self.pos = (self.pos + partial_block_len) % RATE;
         if rest_output.is_empty() {
             return;
         }
 
-        let (chunks, rest) = rest_output.as_chunks_mut::<RATE_BYTES>();
+        let (chunks, rest) = rest_output.as_chunks_mut::<RATE>();
         for chunk in chunks {
             self.state.keccakf_1600_permute();
-            chunk.copy_from_slice(&self.state.bytes()[..RATE_BYTES]);
+            chunk.copy_from_slice(&self.state.bytes()[..RATE]);
         }
         self.pos = rest.len();
         rest.copy_from_slice(&self.state.bytes()[..self.pos]);
@@ -103,25 +119,25 @@ fn xor_bytes(dest: &mut [u8], other: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::sponge::Absorb;
+    use crate::sponge::{Absorb, AbsorbState, Squeeze};
 
     #[test]
     fn partial_absorb() {
-        const RATE_BYTES_SHA_256: usize = 136;
+        const RATE_SHA_256: usize = 136;
         let sizes: Vec<Vec<usize>> = vec![
             vec![0],
             vec![0, 0],
             vec![0, 30],
             vec![0, 30, 200],
             vec![30, 200],
-            vec![RATE_BYTES_SHA_256, 200],
-            vec![40, RATE_BYTES_SHA_256 - 40],
-            vec![40, RATE_BYTES_SHA_256 - 40, 30],
-            vec![40, RATE_BYTES_SHA_256 - 40, 30, 0, 20],
-            vec![15, 20, 40, RATE_BYTES_SHA_256 - 15 - 20 - 40, 20],
+            vec![RATE_SHA_256, 200],
+            vec![40, RATE_SHA_256 - 40],
+            vec![40, RATE_SHA_256 - 40, 30],
+            vec![40, RATE_SHA_256 - 40, 30, 0, 20],
+            vec![15, 20, 40, RATE_SHA_256 - 15 - 20 - 40, 20],
         ];
         for msg_sizes in sizes {
-            let mut absorb = Absorb::<RATE_BYTES_SHA_256>::new();
+            let mut absorb = AbsorbState::<RATE_SHA_256>::init();
             let msgs: Vec<_> = msg_sizes.iter().map(|size| vec![0; *size]).collect();
             let complete_msg = vec![0; msg_sizes.iter().sum()];
             for msg in &msgs {

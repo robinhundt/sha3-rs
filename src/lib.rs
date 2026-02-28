@@ -29,63 +29,40 @@
 //!
 //! [FIPS 202]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf
 
+pub mod hasher;
 mod permute;
 mod sponge;
 
-use crate::sponge::Absorb;
+pub use hasher::{Sha3_224, Sha3_256, Sha3_384, Sha3_512};
 
 // TODO: remove code duplication. Use a macro?
 
 /// SHA-3 Hash with 224 bits (28 bytes) output.
-pub fn sha3_224(message: &[u8]) -> [u8; 28] {
-    let mut output = [0; 28];
-    const CAPACITY: usize = 224 * 2;
-    const RATE: usize = 1600 - CAPACITY;
-    const RATE_BYTES: usize = RATE / 8;
-    let mut absorb = Absorb::<RATE_BYTES>::new();
-    absorb.absorb(message);
-    let mut sq = absorb.into_squeeze::<0b110>();
-    sq.squeeze(&mut output);
-    output
+pub fn sha3_224(msg: &[u8]) -> [u8; 28] {
+    let mut hasher = Sha3_224::new();
+    hasher.update(msg);
+    hasher.finalize()
 }
 
 /// SHA-3 Hash with 256 bits (32 bytes) output.
-pub fn sha3_256(message: &[u8]) -> [u8; 32] {
-    let mut output = [0; 32];
-    const CAPACITY: usize = 256 * 2;
-    const RATE: usize = 1600 - CAPACITY;
-    const RATE_BYTES: usize = RATE / 8;
-    let mut absorb = Absorb::<RATE_BYTES>::new();
-    absorb.absorb(message);
-    let mut sq = absorb.into_squeeze::<0b110>();
-    sq.squeeze(&mut output);
-    output
+pub fn sha3_256(msg: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha3_256::new();
+    hasher.update(msg);
+    hasher.finalize()
 }
 
 /// SHA-3 Hash with 384 bits (48 bytes) output.
-pub fn sha3_384(message: &[u8]) -> [u8; 48] {
-    let mut output = [0; 48];
-    const CAPACITY: usize = 384 * 2;
-    const RATE: usize = 1600 - CAPACITY;
-    const RATE_BYTES: usize = RATE / 8;
-    let mut absorb = Absorb::<RATE_BYTES>::new();
-    absorb.absorb(message);
-    let mut sq = absorb.into_squeeze::<0b110>();
-    sq.squeeze(&mut output);
-    output
+pub fn sha3_384(msg: &[u8]) -> [u8; 48] {
+    let mut hasher = Sha3_384::new();
+    hasher.update(msg);
+    hasher.finalize()
 }
 
 /// SHA-3 Hash with 512 bits (64 bytes) output.
-pub fn sha3_512(message: &[u8]) -> [u8; 64] {
-    let mut output = [0; 64];
-    const CAPACITY: usize = 512 * 2;
-    const RATE: usize = 1600 - CAPACITY;
-    const RATE_BYTES: usize = RATE / 8;
-    let mut absorb = Absorb::<RATE_BYTES>::new();
-    absorb.absorb(message);
-    let mut sq = absorb.into_squeeze::<0b110>();
-    sq.squeeze(&mut output);
-    output
+pub fn sha3_512(msg: &[u8]) -> [u8; 64] {
+    let mut hasher = Sha3_512::new();
+    hasher.update(msg);
+    hasher.finalize()
 }
 
 #[cfg(test)]
