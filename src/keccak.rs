@@ -9,7 +9,11 @@
 //! [ref-64-bits]: https://github.com/XKCP/XKCP/tree/716f007dd73ef28d357b8162173646be574ad1b7/lib/low/KeccakP-1600/ref-64bits
 //! [XKCP]: https://github.com/XKCP/XKCP
 #![allow(non_snake_case)]
-use std::mem;
+use std::{
+    mem,
+    ops::{Index, IndexMut},
+    slice,
+};
 
 // NOTE: References to Sections, Algorithms, Tables, etc. refer to the
 // FIPS 202 standard (https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf)
@@ -23,73 +27,53 @@ const DELIMETED_SUFFIX: u8 = 0b110;
 /// Number of rounds performed in `KECCAK-C`.
 const ROUNDS: usize = 24;
 
-/// State array A. Contains 1600 bits.
-#[derive(Clone, Copy)]
-struct State {
-    // TODO: Can we use [u64; 25] without needing unsafe or bytemuck/zerocopy?
-    bytes: [u8; 200],
-}
-
 /// Lane of the [`State`] array containing w = 64 bits.
 type Lane = u64;
+
+/// State array A. Contains 1600 bits.
+#[derive(Clone, Copy)]
+struct State([Lane; 25]);
 
 /// Compute a [`Lane`] index if viewing the [`State`] as `[u64; 25]`.
 ///
 /// Note that this does not give you the start byte of a lane in the actual
 /// [`State`]. For that, use [`lane_start_byte`].
+#[inline(always)]
 fn idx(x: usize, y: usize) -> usize {
     // TODO: As in the XKCP/lib/low/KeccakP-1600/ref-64bits/KeccakP-1600-reference.c
     //  reference implementation, this always performs the modulo operation.
-    //  Does the compiler remove this operation in cases where it is note necessary,
+    //  Does the compiler remove this operation in cases where it is not necessary,
     //  e.g. when x and y come from bounded loops?
     (x % 5) + 5 * (y % 5)
 }
 
-/// Start byte of a [`Lane`] in the [`State`].
-///
-/// The [`Lane`] is located at the 8 bytes starting from the position returned
-/// by this function.
-fn lane_start_byte(x: usize, y: usize) -> usize {
-    mem::size_of::<Lane>() * idx(x, y)
+impl Index<(usize, usize)> for State {
+    type Output = Lane;
+
+    #[inline(always)]
+    fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
+        &self.0[idx(x, y)]
+    }
 }
 
-// Notes for read/write/xor_lane:
-// These could be optimized by having state be u64 aligned so that we
-// can directly store/load/xor lanes on LE architectures.
+impl IndexMut<(usize, usize)> for State {
+    #[inline(always)]
+    fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut Self::Output {
+        &mut self.0[idx(x, y)]
+    }
+}
+
 impl State {
-    /// Retrieve the [`Lane`] with coordinates `x` and `y`.
-    fn lane(&self, x: usize, y: usize) -> Lane {
-        let start = lane_start_byte(x, y);
-        // TODO check whether this optimizes to a simple unaligned load
-        //  potentially optimize this by hand. The slice index is likely
-        //  not optimized out
-        let bytes = self.bytes[start..start + 8]
-            .try_into()
-            // TODO: Check optimization
-            //  Very likely to be optimized out
-            .expect("slice has length 8");
-        Lane::from_le_bytes(bytes)
+    fn bytes_mut(&mut self) -> &mut [u8] {
+        let len = self.0.len() * mem::size_of::<u64>();
+        let ptr = self.0.as_mut_ptr().cast();
+        // TODO safety
+        unsafe { slice::from_raw_parts_mut(ptr, len) }
     }
 
-    /// Overwrite the [`Lane`] at coordinates `x` and `y` with the provided
-    /// [`Lane`].
-    fn write_lane(&mut self, x: usize, y: usize, lane: Lane) {
-        // TODO does this properly optimize on an LE architecture?
-        let bytes = lane.to_le_bytes();
-        let start = lane_start_byte(x, y);
-        self.bytes[start..start + 8].copy_from_slice(&bytes);
-    }
-
-    /// In-place XOR of the [`Lane`] at coordinates `x` and `y` with the
-    /// provided [`Lane`].
-    fn xor_lane(&mut self, x: usize, y: usize, lane: Lane) {
-        // TODO Unlikely that this properly optimizes on LE arches
-        //  If the state where u64 aligned, this would be much more efficient
-        let bytes = lane.to_le_bytes();
-        let start = lane_start_byte(x, y);
-        for (state_byte, byte) in self.bytes[start..start + 8].iter_mut().zip(bytes) {
-            *state_byte ^= byte
-        }
+    fn lanes_to_le(&mut self) {
+        #[cfg(target_endian = "big")]
+        self.0.iter_mut().for_each(|l| *l = l.to_le());
     }
 }
 
@@ -101,11 +85,11 @@ fn theta(A: &mut State) {
     // Computes the parity of the columns
     for (x, Cx) in C.iter_mut().enumerate() {
         // One iteration computes the parity bits of one sheet
-        *Cx ^= A.lane(x, 0);
-        *Cx ^= A.lane(x, 1);
-        *Cx ^= A.lane(x, 2);
-        *Cx ^= A.lane(x, 3);
-        *Cx ^= A.lane(x, 4);
+        *Cx ^= A[(x, 0)];
+        *Cx ^= A[(x, 1)];
+        *Cx ^= A[(x, 2)];
+        *Cx ^= A[(x, 3)];
+        *Cx ^= A[(x, 4)];
     }
 
     // Interleaved step 2 and 3
@@ -117,7 +101,7 @@ fn theta(A: &mut State) {
         // Add the θ effect to the whole sheet
         for y in 0..5 {
             // Step 3
-            A.xor_lane(x, y, D);
+            A[(x, y)] ^= D;
         }
     }
 }
@@ -139,8 +123,7 @@ const KECCAK_RHO_OFFSETS: [u32; 25] = [
 fn rho(A: &mut State) {
     for x in 0..5 {
         for y in 0..5 {
-            let rotated = A.lane(x, y).rotate_left(KECCAK_RHO_OFFSETS[x + 5 * y]);
-            A.write_lane(x, y, rotated);
+            A[(x, y)] = A[(x, y)].rotate_left(KECCAK_RHO_OFFSETS[x + 5 * y]);
         }
     }
 }
@@ -156,7 +139,7 @@ fn pi(A: &mut State) {
         for y in 0..5 {
             // TODO: Why is the indexing in the ref implementation
             //  different than in the spec? It must be equivalent
-            A.write_lane(y, 2 * x + 3 * y, temp_A.lane(x, y));
+            A[(y, 2 * x + 3 * y)] = temp_A[(x, y)];
         }
     }
 }
@@ -171,10 +154,10 @@ fn chi(A: &mut State) {
 
     for y in 0..5 {
         for (x, Cx) in C.iter_mut().enumerate() {
-            *Cx = A.lane(x, y) ^ (!A.lane(x + 1, y) & A.lane(x + 2, y));
+            *Cx = A[(x, y)] ^ (!A[(x + 1, y)] & A[(x + 2, y)]);
         }
         for (x, Cx) in C.into_iter().enumerate() {
-            A.write_lane(x, y, Cx);
+            A[(x, y)] = Cx;
         }
     }
 }
@@ -217,7 +200,7 @@ const KECCAK_ROUND_CONSTANTS: [Lane; ROUNDS] = [
 /// > that depends on the round
 /// > index ir. The other 24 lanes are not affected by ι.
 fn iota(A: &mut State, round: usize) {
-    A.xor_lane(0, 0, KECCAK_ROUND_CONSTANTS[round]);
+    A[(0, 0)] ^= KECCAK_ROUND_CONSTANTS[round];
 }
 
 /// 3.3 Algorithm 7: KECCAK-p[b, nr](S)
@@ -225,6 +208,7 @@ fn iota(A: &mut State, round: usize) {
 /// Not the generic algorithm, but specialized to `b = 1600` and `nr = 24`.
 /// See Section 3.4 of FIPS 202.
 fn keccakf_1600_state_permute(state: &mut State) {
+    state.lanes_to_le();
     for round in 0..ROUNDS {
         theta(state);
         rho(state);
@@ -232,6 +216,8 @@ fn keccakf_1600_state_permute(state: &mut State) {
         chi(state);
         iota(state, round);
     }
+
+    state.lanes_to_le();
 }
 
 /// 4. and 5. Sponge Construction instantiated with `pad10*1` and
@@ -243,7 +229,7 @@ fn keccakf_1600_state_permute(state: &mut State) {
 //  keccak for SHAEK XOFs (currently hard-coded for SHA3)
 // TODO Only have capacity as parameter and compute rate to be closer to spec?
 pub(crate) fn keccak(rate: usize, capacity: usize, input: &[u8], output: &mut [u8]) {
-    let mut state = State { bytes: [0_u8; 200] };
+    let mut state = State([0; 25]);
     let rate_in_bytes = rate / 8;
 
     debug_assert_eq!(
@@ -254,35 +240,32 @@ pub(crate) fn keccak(rate: usize, capacity: usize, input: &[u8], output: &mut [u
     debug_assert_eq!(0, rate % 8, "rate must be divisible by 8");
 
     // Absorb input blocks into state
-    let mut block_size = 0;
-    for input_block in input.chunks(rate_in_bytes) {
-        block_size = input_block.len();
-
-        // for_each combinator can lead to better codegen
-        // TODO benchmark this
-        state
-            .bytes
-            .iter_mut()
-            .zip(input_block)
-            .for_each(|(state, input)| {
-                *state ^= input;
-            });
-
-        if input_block.len() == rate_in_bytes {
-            keccakf_1600_state_permute(&mut state);
-            block_size = 0;
-        }
+    let mut iter = input.chunks_exact(rate_in_bytes);
+    for input_block in iter.by_ref() {
+        xor_bytes(state.bytes_mut(), input_block);
+        keccakf_1600_state_permute(&mut state);
     }
 
+    xor_bytes(state.bytes_mut(), iter.remainder());
+
+    let end = iter.remainder().len();
     // Add domain separator and first 1 bit of padding
-    state.bytes[block_size] ^= DELIMETED_SUFFIX;
+    state.bytes_mut()[end] ^= DELIMETED_SUFFIX;
     // Add second 1 bit of padding
-    state.bytes[rate_in_bytes - 1] ^= 0b10000000_u8;
+    state.bytes_mut()[rate_in_bytes - 1] ^= 0b10000000_u8;
 
     // squeezing phase
     for output_block in output.chunks_mut(rate_in_bytes) {
         keccakf_1600_state_permute(&mut state);
         let block_size = output_block.len();
-        output_block.copy_from_slice(&state.bytes[..block_size]);
+        output_block.copy_from_slice(&state.bytes_mut()[..block_size]);
     }
+}
+
+fn xor_bytes(dest: &mut [u8], other: &[u8]) {
+    // for_each combinator can lead to better codegen
+    // TODO benchmark this
+    dest.iter_mut().zip(other).for_each(|(state, input)| {
+        *state ^= input;
+    });
 }

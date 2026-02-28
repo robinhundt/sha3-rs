@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 //! SHA-3 Hash Functions
 //!
 //! This crate provides portable, pure Rust implementations of the SHA-3 hashing
@@ -74,6 +73,7 @@ pub fn sha3_512(message: &[u8]) -> [u8; 64] {
 
 #[cfg(test)]
 mod tests {
+
     use crate::sha3_256;
 
     #[test]
