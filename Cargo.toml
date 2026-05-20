@@ -8,7 +8,7 @@ version = "0.1.0"
 [dev-dependencies]
 haste = "0.1.0-alpha.2"
 hex = "0.4.3"
-libcrux-sha3 = "0.0.7"
+libcrux-sha3 = "0.0.9"
 
 [profile.profiling]
 debug = true
