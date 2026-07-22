@@ -32,7 +32,7 @@ jobs:
         run: lscpu
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
           toolchain: stable
 
@@ -50,7 +50,7 @@ jobs:
       - *cache
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
           toolchain: stable
           components: "rust-src"
@@ -72,7 +72,7 @@ jobs:
       - *cache
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
           toolchain: nightly
           components: "miri,rust-src"
@@ -91,7 +91,7 @@ jobs:
 
       # nightly is needed for the unstable rustfmt options specified in project rustfmt.toml
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
           toolchain: nightly
           components: "rustfmt"
@@ -107,7 +107,7 @@ jobs:
       - *cache
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
           toolchain: "stable"
           components: "clippy"
@@ -127,7 +127,7 @@ jobs:
 
         # nightly is needed for the unstable rustdoc options
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
           toolchain: nightly
           components: "rust-docs"
