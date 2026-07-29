@@ -57,7 +57,7 @@ jobs:
           targets: "${{ matrix.target }}"
       
       - name: Install cargo cross
-        uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # 2.81.9
+        uses: taiki-e/install-action@c44f6b046f1c29ae5918b1e0bfdbb2f1813836fd # 2.84.1
         with:
           tool: cross@0.2.5
       
