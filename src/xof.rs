@@ -1,10 +1,7 @@
 //! SHAKE extendable-output functions (XOFs).
-use const_array::{Array, ArrayLen, Len, SameLen, Sum, same_len};
+use const_array::{Array, ArrayLen};
 
-use crate::{
-    permute::StateSize,
-    sponge::{AbsorbState, SpongeParams, SqueezeState},
-};
+use crate::sponge::{AbsorbState, SpongeParams, SqueezeState, sponge_params};
 
 /// Domain separation suffix of the SHAKE functions, followed by the first bit
 /// of the padding.
@@ -13,18 +10,22 @@ const SHAKE_SUFFIX: u8 = 0b11111;
 /// Absorbs the input of a SHAKE XOF.
 ///
 /// Call [`Xof::finalize`] to obtain an [`XofReader`] for the output.
+#[derive(Clone)]
 pub struct Xof<S: XofSecurity> {
     state: AbsorbState<S>,
 }
 
 /// Squeezes an arbitrary amount of output from a SHAKE XOF.
+#[derive(Clone)]
 pub struct XofReader<S: XofSecurity> {
     state: SqueezeState<S>,
 }
 
 /// Marker type for 128-bit security.
+#[derive(Clone, Copy, Debug)]
 pub struct Security128;
 /// Marker type for 256-bit security.
+#[derive(Clone, Copy, Debug)]
 pub struct Security256;
 
 /// SHAKE128 [`Xof`].
@@ -49,7 +50,7 @@ impl<S: XofSecurity> Xof<S> {
 
     pub fn finalize(self) -> XofReader<S> {
         XofReader {
-            state: self.state.into_squeeze::<SHAKE_SUFFIX>(),
+            state: self.state.into_squeeze(),
         }
     }
 }
@@ -90,20 +91,8 @@ impl<S: XofSecurity> XofReader<S> {
 /// [`Security256`].
 pub trait XofSecurity: SpongeParams {}
 
-impl SpongeParams for Security128 {
-    type Rate = Len<{ (1600 - 128 * 2) / 8 }>;
-    type Capacity = Len<{ 128 * 2 / 8 }>;
-    const STATE_SPLIT: SameLen<StateSize, Sum<Self::Rate, Self::Capacity>> =
-        same_len!(StateSize, Sum<Self::Rate, Self::Capacity>);
-}
-
+sponge_params!(Security128, capacity_bits: 2 * 128, suffix: SHAKE_SUFFIX);
 impl XofSecurity for Security128 {}
 
-impl SpongeParams for Security256 {
-    type Rate = Len<{ (1600 - 256 * 2) / 8 }>;
-    type Capacity = Len<{ 256 * 2 / 8 }>;
-    const STATE_SPLIT: SameLen<StateSize, Sum<Self::Rate, Self::Capacity>> =
-        same_len!(StateSize, Sum<Self::Rate, Self::Capacity>);
-}
-
+sponge_params!(Security256, capacity_bits: 2 * 256, suffix: SHAKE_SUFFIX);
 impl XofSecurity for Security256 {}

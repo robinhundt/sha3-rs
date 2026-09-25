@@ -1,25 +1,27 @@
-use const_array::{Array, ArrayLen, AtMost, Len, SameLen, Sum, at_most, same_len};
+use const_array::{Array, ArrayLen, AtMost, Len, at_most};
 
-use crate::{
-    permute::StateSize,
-    sponge::{AbsorbState, SpongeParams},
-};
+use crate::sponge::{AbsorbState, SpongeParams, sponge_params};
 
 /// Domain separation suffix of the SHA-3 hash functions, followed by the
 /// first bit of the padding.
 const SHA3_SUFFIX: u8 = 0b110;
 
+#[derive(Clone)]
 pub struct Hasher<S: HashSize> {
     state: AbsorbState<S>,
 }
 
 /// Marker type for 224-bit output.
+#[derive(Clone, Copy, Debug)]
 pub struct Out224;
 /// Marker type for 256-bit output.
+#[derive(Clone, Copy, Debug)]
 pub struct Out256;
 /// Marker type for 384-bit output.
+#[derive(Clone, Copy, Debug)]
 pub struct Out384;
 /// Marker type for 512-bit output.
+#[derive(Clone, Copy, Debug)]
 pub struct Out512;
 
 /// SHA-3 [`Hasher`] with 224-bit output.
@@ -43,8 +45,14 @@ impl<S: HashSize> Hasher<S> {
     }
 
     pub fn finalize(self) -> Array<u8, S::OutputSize> {
-        self.state
-            .squeeze_block::<SHA3_SUFFIX, _>(S::OUTPUT_FITS_RATE)
+        self.state.squeeze_block(S::OUTPUT_FITS_RATE)
+    }
+
+    /// Hash a complete message.
+    pub fn digest(msg: &[u8]) -> Array<u8, S::OutputSize> {
+        let mut hasher = Self::new();
+        hasher.update(msg);
+        hasher.finalize()
     }
 }
 
@@ -68,12 +76,7 @@ pub trait HashSize: SpongeParams {
 
 macro_rules! impl_hash_size {
     ($marker:ty, $bits:literal) => {
-        impl SpongeParams for $marker {
-            type Rate = Len<{ (1600 - $bits * 2) / 8 }>;
-            type Capacity = Len<{ $bits * 2 / 8 }>;
-            const STATE_SPLIT: SameLen<StateSize, Sum<Self::Rate, Self::Capacity>> =
-                same_len!(StateSize, Sum<Self::Rate, Self::Capacity>);
-        }
+        sponge_params!($marker, capacity_bits: 2 * $bits, suffix: SHA3_SUFFIX);
 
         impl HashSize for $marker {
             type OutputSize = Len<{ $bits / 8 }>;

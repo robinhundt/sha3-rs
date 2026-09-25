@@ -8,15 +8,38 @@ use crate::permute::{State, StateSize};
 /// Parameters of a sponge over Keccakf[1600].
 ///
 /// This trait is public, but can't be named outside of this crate. This
-/// seals the public traits which have it as a supertrait.
-pub trait SpongeParams {
+/// seals the public traits which have it as a supertrait. Implement it with
+/// [`sponge_params!`].
+pub trait SpongeParams: Clone {
     /// Number of bytes absorbed or squeezed per permutation.
     type Rate: ArrayLen;
     /// Number of bytes of the state which are not directly in- or output.
     type Capacity: ArrayLen;
     /// Proof that the state consists of the rate followed by the capacity.
     const STATE_SPLIT: SameLen<StateSize, Sum<Self::Rate, Self::Capacity>>;
+    /// Domain separation suffix, followed by the first bit of the padding.
+    const DELIMITED_SUFFIX: u8;
 }
+
+/// Implement [`SpongeParams`] for a marker type from the capacity in bits and
+/// the domain separation suffix.
+macro_rules! sponge_params {
+    ($marker:ty, capacity_bits: $bits:expr, suffix: $suffix:expr $(,)?) => {
+        impl $crate::sponge::SpongeParams for $marker {
+            type Rate = ::const_array::Len<{ (1600 - $bits) / 8 }>;
+            type Capacity = ::const_array::Len<{ $bits / 8 }>;
+            const STATE_SPLIT: ::const_array::SameLen<
+                $crate::permute::StateSize,
+                ::const_array::Sum<Self::Rate, Self::Capacity>,
+            > = ::const_array::same_len!(
+                $crate::permute::StateSize,
+                ::const_array::Sum<Self::Rate, Self::Capacity>
+            );
+            const DELIMITED_SUFFIX: u8 = $suffix;
+        }
+    };
+}
+pub(crate) use sponge_params;
 
 impl State {
     fn rate<P: SpongeParams>(&self) -> &Array<u8, P::Rate> {
@@ -29,6 +52,7 @@ impl State {
 }
 
 /// Absorb bytes into the Keccakf[1600] state.
+#[derive(Clone)]
 pub(crate) struct AbsorbState<P> {
     pos: usize,
     state: State,
@@ -80,8 +104,8 @@ impl<P: SpongeParams> AbsorbState<P> {
     /// Note that this performs no permute! Contrary to to FIPS202, we define
     /// the squeezing phase to start with a permutation (instead of ending
     /// the absorption with a permutation).
-    pub(crate) fn into_squeeze<const DELIMITED_SUFFIX: u8>(self) -> SqueezeState<P> {
-        SqueezeState::new(self.pad::<DELIMITED_SUFFIX>())
+    pub(crate) fn into_squeeze(self) -> SqueezeState<P> {
+        SqueezeState::new(self.pad())
     }
 
     /// Add domain separator and padding and squeeze an output which fits into
@@ -89,24 +113,22 @@ impl<P: SpongeParams> AbsorbState<P> {
     ///
     /// This is equivalent to, but cheaper than, squeezing `O::USIZE` bytes
     /// from [`AbsorbState::into_squeeze`].
-    pub(crate) fn squeeze_block<const DELIMITED_SUFFIX: u8, O: ArrayLen>(
-        self,
-        fits: AtMost<O, P::Rate>,
-    ) -> Array<u8, O> {
-        let mut state = self.pad::<DELIMITED_SUFFIX>();
+    pub(crate) fn squeeze_block<O: ArrayLen>(self, fits: AtMost<O, P::Rate>) -> Array<u8, O> {
+        let mut state = self.pad();
         state.keccakf_1600_permute();
         state.rate::<P>().prefix_ref(fits).clone()
     }
 
-    fn pad<const DELIMITED_SUFFIX: u8>(mut self) -> State {
+    fn pad(mut self) -> State {
         let rate = self.state.rate_mut::<P>();
-        rate[self.pos] ^= DELIMITED_SUFFIX;
+        rate[self.pos] ^= P::DELIMITED_SUFFIX;
         rate[P::Rate::USIZE - 1] ^= 0b10000000_u8;
         self.state
     }
 }
 
 /// Squeeze bytes from the Keccakf[1600] state.
+#[derive(Clone)]
 pub(crate) struct SqueezeState<P> {
     pos: usize,
     state: State,
@@ -192,7 +214,7 @@ mod tests {
             for msg in &msgs {
                 absorb.absorb(msg);
             }
-            let mut squeeze = absorb.into_squeeze::<0b110_u8>();
+            let mut squeeze = absorb.into_squeeze();
             let mut output = [0; 32];
             squeeze.squeeze(&mut output);
             let expected = libcrux_sha3::sha256(&complete_msg);
@@ -223,7 +245,7 @@ mod tests {
         for out_sizes in sizes {
             let mut absorb = AbsorbState::<Security128>::new();
             absorb.absorb(&input);
-            let mut squeeze = absorb.into_squeeze::<0b11111>();
+            let mut squeeze = absorb.into_squeeze();
             let total_len = out_sizes.iter().sum();
             let mut output = vec![0; total_len];
             let mut start = 0;
