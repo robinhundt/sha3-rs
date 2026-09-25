@@ -14,6 +14,8 @@ use std::{
     ops::{Index, IndexMut},
 };
 
+use const_array::{Array, Len};
+
 // NOTE: References to Sections, Algorithms, Tables, etc. refer to the
 // FIPS 202 standard (https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf)
 // if not otherwise specified.
@@ -24,9 +26,12 @@ const ROUNDS: usize = 24;
 /// Lane of the [`State`] array containing w = 64 bits.
 type Lane = u64;
 
+/// Size of the [`State`] in bytes.
+pub(crate) type StateSize = Len<200>;
+
 /// State array A of Keccakf[1600]. Contains 1600 bits.
 #[derive(Clone, Copy)]
-pub(crate) struct State<const RATE: usize>([Lane; 25]);
+pub(crate) struct State([Lane; 25]);
 
 /// Compute a [`Lane`] index in [`State`].
 #[inline(always)]
@@ -35,7 +40,7 @@ fn idx(x: usize, y: usize) -> usize {
     (x % 5) + 5 * (y % 5)
 }
 
-impl<const RATE: usize> Index<(usize, usize)> for State<RATE> {
+impl Index<(usize, usize)> for State {
     type Output = Lane;
 
     #[inline(always)]
@@ -44,39 +49,34 @@ impl<const RATE: usize> Index<(usize, usize)> for State<RATE> {
     }
 }
 
-impl<const RATE: usize> IndexMut<(usize, usize)> for State<RATE> {
+impl IndexMut<(usize, usize)> for State {
     #[inline(always)]
     fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut Self::Output {
         &mut self.0[idx(x, y)]
     }
 }
 
-impl<const RATE: usize> State<RATE> {
+impl State {
     pub(crate) fn new() -> Self {
-        assert!(
-            RATE == 144 || RATE == 136 || RATE == 104 || RATE == 72,
-            "Invalid RATE for Keccakf[1600]"
-        );
-
         Self([0; 25])
     }
 
-    pub(crate) fn bytes(&self) -> &[u8; RATE] {
-        assert!(RATE < mem::size_of::<[Lane; 25]>());
+    pub(crate) fn bytes(&self) -> &Array<u8, StateSize> {
+        const { assert!(mem::size_of::<[Lane; 25]>() == 200) };
         // SAFETY:
         // - ptr is non-null
         // - ptr is correctly aligned (align(u8) < align(u64))
-        // - pointed to memory is valid and correct size
-        unsafe { &*self.0.as_ptr().cast() }
+        // - pointed to memory is valid and has the same size (checked above)
+        Array::from_ref(unsafe { &*self.0.as_ptr().cast() })
     }
 
-    pub(crate) fn bytes_mut(&mut self) -> &mut [u8; RATE] {
-        assert!(RATE < mem::size_of::<[Lane; 25]>());
+    pub(crate) fn bytes_mut(&mut self) -> &mut Array<u8, StateSize> {
+        const { assert!(mem::size_of::<[Lane; 25]>() == 200) };
         // SAFETY:
         // - ptr is non-null
         // - ptr is correctly aligned (align(u8) < align(u64))
-        // - pointed to memory is valid and correct size
-        unsafe { &mut *self.0.as_mut_ptr().cast() }
+        // - pointed to memory is valid and has the same size (checked above)
+        Array::from_mut(unsafe { &mut *self.0.as_mut_ptr().cast() })
     }
 
     /// 3.3 Algorithm 7: KECCAK-p[b, nr](S)
@@ -105,7 +105,7 @@ impl<const RATE: usize> State<RATE> {
 }
 
 /// 3.2.1 Algorithm 1: θ(A)
-fn theta<const RATE: usize>(A: &mut State<RATE>) {
+fn theta(A: &mut State) {
     // We have 5 * 64 columns, whose parity bits we can store in 5 lanes
     let mut C: [Lane; 5] = Default::default();
     // Step 1
@@ -147,7 +147,7 @@ const KECCAK_RHO_OFFSETS: [u32; 25] = [
 /// > offset, which depends on the fixed x and y coordinates of the
 /// > lane. Equivalently, for each bit in the lane, the z coordinate is
 /// > modified by adding the offset, modulo the lane size.
-fn rho<const RATE: usize>(A: &mut State<RATE>) {
+fn rho(A: &mut State) {
     for x in 0..5 {
         for y in 0..5 {
             A[(x, y)] = A[(x, y)].rotate_left(KECCAK_RHO_OFFSETS[x + 5 * y]);
@@ -160,7 +160,7 @@ fn rho<const RATE: usize>(A: &mut State<RATE>) {
 /// Quote from 3.2.3 (description of π):
 /// > The effect of π is to rearrange the positions of the lanes, as illustrated
 /// > for any slice in Figure 5 below.
-fn pi<const RATE: usize>(A: &mut State<RATE>) {
+fn pi(A: &mut State) {
     let temp_A = *A;
     for x in 0..5 {
         for y in 0..5 {
@@ -176,7 +176,7 @@ fn pi<const RATE: usize>(A: &mut State<RATE>) {
 /// Quote from 3.2.4:
 /// > The effect of χ is to XOR each bit with a non-linear function of two other
 /// > bits in its row
-fn chi<const RATE: usize>(A: &mut State<RATE>) {
+fn chi(A: &mut State) {
     let mut C: [Lane; 5] = Default::default();
 
     for y in 0..5 {
@@ -226,6 +226,6 @@ const KECCAK_ROUND_CONSTANTS: [Lane; ROUNDS] = [
 /// > The effect of ι is to modify some of the bits of Lane (0, 0) in a manner
 /// > that depends on the round
 /// > index ir. The other 24 lanes are not affected by ι.
-fn iota<const RATE: usize>(A: &mut State<RATE>, round: usize) {
+fn iota(A: &mut State, round: usize) {
     A[(0, 0)] ^= KECCAK_ROUND_CONSTANTS[round];
 }
