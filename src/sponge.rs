@@ -69,8 +69,8 @@ impl<P: SpongeParams> AbsorbState<P> {
     }
 
     pub(crate) fn absorb(&mut self, msg: &[u8]) {
-        // first, we handle a potentially partial block, either due to and advanced
-        // position or msg.len() < RATE
+        // first, we handle a potentially partial block, either due to and
+        // advanced position or msg.len() < RATE
         let partial_block_len = (P::Rate::USIZE - self.pos).min(msg.len());
         let (first_msg, rest_msg) = msg.split_at(partial_block_len);
         xor_bytes(&mut self.state.rate_mut::<P>()[self.pos..], first_msg);
@@ -81,8 +81,9 @@ impl<P: SpongeParams> AbsorbState<P> {
         } else {
             // otherwise, we increment the position.
             self.pos += partial_block_len;
-            // this branch is only taken if self.pos + partial_block_len < RATE, so
-            // we know that rest_msg.is_empty() and can safely return
+            // this branch is only taken if self.pos + partial_block_len < RATE,
+            // so we know that rest_msg.is_empty() and can safely
+            // return
             debug_assert!(rest_msg.is_empty());
             return;
         }

@@ -21,8 +21,8 @@ impl KatSet {
     }
 
     fn parse(inp: &str) -> Self {
-        // TODO: This parsing code could definitely be done more elegantly and with
-        // better error handling
+        // TODO: This parsing code could definitely be done more elegantly and
+        // with better error handling
         let mut tests = vec![];
         let mut lines = inp
             .lines()
