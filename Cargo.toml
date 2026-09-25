@@ -4,6 +4,7 @@ name = "sha3"
 version = "0.1.0"
 
 [dependencies]
+const-array = "0.1.0-alpha.3"
 
 [dev-dependencies]
 haste = "0.1.0-alpha.2"

@@ -1,7 +1,16 @@
-use crate::sponge::{Absorb, AbsorbState, Squeeze};
+use const_array::{Array, ArrayLen, AtMost, Len, SameLen, Sum, at_most, same_len};
+
+use crate::{
+    permute::StateSize,
+    sponge::{AbsorbState, SpongeParams},
+};
+
+/// Domain separation suffix of the SHA-3 hash functions, followed by the
+/// first bit of the padding.
+const SHA3_SUFFIX: u8 = 0b110;
 
 pub struct Hasher<S: HashSize> {
-    state: S::State,
+    state: AbsorbState<S>,
 }
 
 /// Marker type for 224-bit output.
@@ -25,7 +34,7 @@ pub type Sha3_512 = Hasher<Out512>;
 impl<S: HashSize> Hasher<S> {
     pub fn new() -> Self {
         Hasher {
-            state: S::State::init(),
+            state: AbsorbState::new(),
         }
     }
 
@@ -33,77 +42,48 @@ impl<S: HashSize> Hasher<S> {
         self.state.absorb(msg);
     }
 
-    pub fn finalize(self) -> S::Output {
-        let mut output = S::Output::default();
-        let mut squeeze = self.state.into_squeeze::<0b110>();
-        squeeze.squeeze(output.as_mut());
-        output
+    pub fn finalize(self) -> Array<u8, S::OutputSize> {
+        self.state
+            .squeeze_block::<SHA3_SUFFIX, _>(S::OUTPUT_FITS_RATE)
     }
 }
 
 impl<S: HashSize> Default for Hasher<S> {
     fn default() -> Self {
-        Self {
-            state: S::State::init(),
+        Self::new()
+    }
+}
+
+/// Output size of a SHA-3 [`Hasher`].
+///
+/// This trait is sealed and implemented by [`Out224`], [`Out256`],
+/// [`Out384`] and [`Out512`].
+pub trait HashSize: SpongeParams {
+    /// Size of the digest in bytes.
+    type OutputSize: ArrayLen;
+    /// Proof that the digest fits into a single block of the sponge, so it
+    /// can be squeezed with a single permutation.
+    const OUTPUT_FITS_RATE: AtMost<Self::OutputSize, Self::Rate>;
+}
+
+macro_rules! impl_hash_size {
+    ($marker:ty, $bits:literal) => {
+        impl SpongeParams for $marker {
+            type Rate = Len<{ (1600 - $bits * 2) / 8 }>;
+            type Capacity = Len<{ $bits * 2 / 8 }>;
+            const STATE_SPLIT: SameLen<StateSize, Sum<Self::Rate, Self::Capacity>> =
+                same_len!(StateSize, Sum<Self::Rate, Self::Capacity>);
         }
-    }
+
+        impl HashSize for $marker {
+            type OutputSize = Len<{ $bits / 8 }>;
+            const OUTPUT_FITS_RATE: AtMost<Self::OutputSize, Self::Rate> =
+                at_most!(Self::OutputSize, Self::Rate);
+        }
+    };
 }
 
-#[allow(private_bounds)]
-pub trait HashSize: Params {
-    type Output: Output;
-}
-
-trait Params {
-    type State: Absorb;
-}
-
-impl HashSize for Out224 {
-    type Output = [u8; 28];
-}
-
-impl Params for Out224 {
-    type State = AbsorbState<{ (1600 - 224 * 2) / 8 }>;
-}
-
-impl HashSize for Out256 {
-    type Output = [u8; 32];
-}
-
-impl Params for Out256 {
-    type State = AbsorbState<{ (1600 - 256 * 2) / 8 }>;
-}
-
-impl HashSize for Out384 {
-    type Output = [u8; 48];
-}
-
-impl Params for Out384 {
-    type State = AbsorbState<{ (1600 - 384 * 2) / 8 }>;
-}
-
-impl HashSize for Out512 {
-    type Output = [u8; 64];
-}
-
-impl Params for Out512 {
-    type State = AbsorbState<{ (1600 - 512 * 2) / 8 }>;
-}
-
-// The normal Default trait is not implemented for arrays with len > 32, so we
-// define this helper trait
-pub trait Output: AsMut<[u8]> + private::Sealed {
-    fn default() -> Self;
-}
-
-impl<const N: usize> Output for [u8; N] {
-    fn default() -> Self {
-        [0; N]
-    }
-}
-
-mod private {
-    impl<const N: usize> Sealed for [u8; N] {}
-
-    pub trait Sealed {}
-}
+impl_hash_size!(Out224, 224);
+impl_hash_size!(Out256, 256);
+impl_hash_size!(Out384, 384);
+impl_hash_size!(Out512, 512);
