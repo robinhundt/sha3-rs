@@ -141,9 +141,9 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "const-array"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c30d4a355b3240bd52dd8242ed2e63666a0631400b9a89a61e887977d2309116"
+checksum = "71c088c397b54bff849b8b2f9176002e89c895f4b276d3fc7e24445518e3a733"
 
 [[package]]
 name = "core-models"
